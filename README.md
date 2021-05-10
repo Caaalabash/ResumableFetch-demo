@@ -424,4 +424,4 @@ class ResumableFetch {
 
 效果如下：
 
-<video src="https://static.calabash.top/QQ20210510-101900-HD.mp4" controls width="100%"></video>
+![demo - gif](https://static.calabash.top/QQ20210510-101900-HD.gif)
