@@ -4,10 +4,10 @@ import StateMachine from 'javascript-state-machine'
 // 可暂停->恢复的fetch
 class ResumableFetch {
   constructor(input, init) {
-    // fetch的入参就是这个命名
+    // input/init同fetch api
     this.input = input
     this.init = init || {}
-    // 状态机
+    // 状态机描述
     this.stateMache = new StateMachine({
       init: 'init',
       transitions: [
@@ -18,10 +18,10 @@ class ResumableFetch {
         { name: 'reset', from: ['fetching', 'waiting', 'end'], to: 'init' },
       ],
       methods: {
-        onAfterFetch: () => this.onFetch(true),
-        onAfterAbort: () => this.onAbort(),
-        onAfterResume: () => this.onFetch(false),
-        onAfterReset: () => this.onReset(),
+        onFetch: () => this.onFetch(true),
+        onAbort: () => this.onAbort(),
+        onResume: () => this.onFetch(false),
+        onReset: () => this.onReset(),
       }
     })
     this._request = null
@@ -58,21 +58,30 @@ class ResumableFetch {
       console.warn(`[ResumableFetch] You can't perform abort on "${this.stateMache.state}" state`)
     }
   }
+  // 调用abort(), 状态从fetching -> waiting，然后触发onAbort()
+  // 中断请求，重置_aborter
+  onAbort() {
+    this._aborter.abort()
+    this._aborter = null
+  }
+  // 调用reset(), 状态从 fetching/waiting/end -> init，然后触发onReset
+  // 如果在请求中，中断请求，重置相关数据
   onReset() {
     this._request = null
     this._contentType = null
     this._contentLength = 0
     this._downloadLength = 0
+    if (this._aborter) {
+      this._aborter.abort()
+    }
     this._aborter = null
     this._chunks = []
   }
-  onAbort() {
-    this._aborter.abort()
-    this._aborter = null
-  }
+  // 调用start(), init -> fetching，触发onFetch(true)，waiting -> fetching，触发onFetch(false)
   onFetch(isFetch) {
     this._aborter = new AbortController()
     const { headers } = this.init
+    // 添加中断控制器信号以及range请求头，每次都从上次记录位置继续请求余下的内容
     const init = {
       ...this.init,
       headers: {
@@ -83,12 +92,14 @@ class ResumableFetch {
     }
     this._request = fetch(this.input, init)
       .then(res => {
+        // 首次请求记录 下载文件类型/下载文件总长度
         if (isFetch) {
           this._contentLength = res.headers.get('content-length')
           this._contentType = res.headers.get('content-type')
         }
         return res.body.getReader()
       })
+      // 涉及到stream api
       .then(reader => this.readChunks(reader))
       // 这一步很大程度上只是为了让 new ResumableFetch().start() 等价于 fetch()
       .then(chunks => {
@@ -115,6 +126,7 @@ class ResumableFetch {
       })
   }
   readChunks(reader) {
+    // 不断从可读流中取得数据，更新已下载长度，以及进度条
     return reader.read().then(({ value, done }) => {
       if (done) {
         this.stateMache.finish()
